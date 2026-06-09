@@ -43,6 +43,9 @@ function GameState.new()
     -- 走子历史（用来悔棋）
     self.move_history = {}
     
+    -- 游戏状态："playing" / "checkmate" / "stalemate"
+    self.status = "playing"
+    
     Logger.info("游戏状态创建完成")
     return self
 end
@@ -113,6 +116,7 @@ function GameState:init_board()
     self.winner = nil
     self.selected_piece = nil
     self.move_history = {}
+    self.status = "playing"
     
     Logger.info(string.format("棋盘初始化完成，共 %d 个棋子", #self.pieces))
 end
@@ -221,6 +225,9 @@ function GameState:move_piece(piece, to_col, to_row, animate)
     
     -- 取消选中
     self.selected_piece = nil
+    
+    -- 检查游戏是否结束
+    self:_check_game_end()
     
     return captured_piece
 end
@@ -334,6 +341,93 @@ function GameState:draw_pieces(cell_size)
     -- 再画选中的（在最上面）
     if self.selected_piece and self.selected_piece.alive then
         self.selected_piece:draw(cell_size)
+    end
+end
+
+--[[
+    悔棋，回退上一步
+    返回：
+        success (boolean) - 是否悔棋成功
+        move (table) - 悔掉的那一步
+]]
+function GameState:undo_move()
+    if #self.move_history == 0 then
+        Logger.debug("没有可以悔的棋了")
+        return false, nil
+    end
+    
+    -- 取出最后一步
+    local last_move = table.remove(self.move_history)
+    local piece = last_move.piece
+    local captured_piece = last_move.captured_piece
+    
+    -- 把棋子移回原来的位置
+    -- 先从当前位置移除
+    self.board[piece.col][piece.row] = nil
+    
+    -- 更新棋子坐标
+    piece.col = last_move.from_col
+    piece.row = last_move.from_row
+    piece.is_moving = false  -- 取消移动动画
+    
+    -- 放回棋盘数组
+    self.board[piece.col][piece.row] = piece
+    
+    -- 如果有被吃的棋子，恢复它
+    if captured_piece then
+        captured_piece.alive = true
+        self.board[captured_piece.col][captured_piece.row] = captured_piece
+        -- 加回pieces列表
+        table.insert(self.pieces, captured_piece)
+    end
+    
+    -- 切换回上一个回合
+    self.current_turn = last_move.turn
+    
+    -- 取消选中
+    self:select_piece(nil)
+    
+    -- 重置游戏状态
+    self.game_over = false
+    self.winner = nil
+    self.status = "playing"
+    
+    Logger.info(string.format("悔棋：%s %s 从 (%d,%d) 回到 (%d,%d)",
+        piece.color, piece:get_char(),
+        last_move.to_col, last_move.to_row,
+        last_move.from_col, last_move.from_row))
+    
+    return true, last_move
+end
+
+--[[
+    检查游戏是否结束（将死或困毙）
+    内部方法，走子后自动调用
+]]
+function GameState:_check_game_end()
+    local Rules = require("game.rules")
+    
+    -- 下一个回合的玩家是不是没棋可走了
+    local next_turn = self.current_turn
+    
+    if Rules.is_checkmate(next_turn, self) then
+        -- 将死，当前走棋的一方赢了
+        self.status = "checkmate"
+        self.game_over = true
+        self.winner = next_turn == "red" and "black" or "red"
+        Logger.info(string.format("游戏结束：%s方将死%s方，%s方获胜！",
+            self.winner == "red" and "红" or "黑",
+            next_turn == "red" and "红" or "黑",
+            self.winner == "red" and "红" or "黑"))
+    elseif Rules.is_stalemate(next_turn, self) then
+        -- 困毙，和棋？或者算输？
+        -- 中国象棋困毙算输
+        self.status = "stalemate"
+        self.game_over = true
+        self.winner = next_turn == "red" and "black" or "red"
+        Logger.info(string.format("游戏结束：%s方困毙，%s方获胜！",
+            next_turn == "red" and "红" or "黑",
+            self.winner == "red" and "红" or "黑"))
     end
 end
 

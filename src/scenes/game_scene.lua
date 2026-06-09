@@ -143,6 +143,11 @@ function GameScene:_on_mouse_press(data)
     
     -- 处理棋子点击
     if self._game_state and self._board then
+        -- 游戏结束了就不让点了
+        if self._game_state.game_over then
+            return
+        end
+        
         -- 转换为棋盘坐标
         local col_f, row_f = self._board:screen_to_board(data.x, data.y)
         local col = math.floor(col_f + 0.5)
@@ -230,6 +235,15 @@ function GameScene:_on_key_press(data)
         if self._game_state then
             self._game_state:init_board()
             Logger.info("游戏已重置")
+        end
+    end
+    
+    -- 按u悔棋
+    if key == "u" then
+        if self._game_state and not self._game_state.game_over then
+            -- 悔一步，双人模式的话悔一步就是对方的上一步，所以要悔两步？
+            -- 我们先做悔一步，后面可以调
+            self._game_state:undo_move()
         end
     end
     
@@ -407,11 +421,71 @@ function GameScene:draw()
             
             love.graphics.print("棋子总数: " .. #self._game_state.pieces, 10, 170)
             love.graphics.print("走子步数: " .. #self._game_state.move_history, 10, 190)
+            
+            -- 将军提示
+            local in_check = Rules.is_in_check(self._game_state.current_turn, self._game_state)
+            if in_check then
+                love.graphics.setColor(1, 0.3, 0.3, 1)
+                love.graphics.print("⚠ 将军！", 10, 210)
+                love.graphics.setColor(1, 1, 1, 1)
+            end
+        end
+        
+        -- 游戏结束提示（在最上面）
+        if self._game_state and self._game_state.game_over then
+            local w = 400
+            local h = 200
+            local x = love.graphics.getWidth() / 2 - w / 2
+            local y = love.graphics.getHeight() / 2 - h / 2
+            
+            -- 半透明背景
+            love.graphics.setColor(0, 0, 0, 0.8)
+            love.graphics.rectangle("fill", x, y, w, h, 10, 10)
+            
+            -- 边框
+            love.graphics.setColor(0.8, 0.6, 0.2, 1)
+            love.graphics.setLineWidth(3)
+            love.graphics.rectangle("line", x, y, w, h, 10, 10)
+            love.graphics.setLineWidth(1)
+            
+            -- 标题
+            local title = ""
+            local sub_title = ""
+            if self._game_state.status == "checkmate" then
+                title = "将 死！"
+                sub_title = (self._game_state.winner == "red" and "红方" or "黑方") .. " 获胜"
+            elseif self._game_state.status == "stalemate" then
+                title = "困 毙！"
+                sub_title = (self._game_state.winner == "red" and "红方" or "黑方") .. " 获胜"
+            end
+            
+            love.graphics.setColor(1, 0.9, 0.5, 1)
+            local title_font = love.graphics.newFont(48)
+            love.graphics.setFont(title_font)
+            local title_w = title_font:getWidth(title)
+            love.graphics.print(title, x + w / 2 - title_w / 2, y + 30)
+            
+            love.graphics.setColor(1, 1, 1, 1)
+            local sub_font = love.graphics.newFont(24)
+            love.graphics.setFont(sub_font)
+            local sub_w = sub_font:getWidth(sub_title)
+            love.graphics.print(sub_title, x + w / 2 - sub_w / 2, y + 100)
+            
+            -- 提示
+            love.graphics.setColor(0.7, 0.7, 0.7, 1)
+            local hint = "按 R 重新开始 | 按 U 悔棋"
+            local hint_font = love.graphics.newFont(16)
+            love.graphics.setFont(hint_font)
+            local hint_w = hint_font:getWidth(hint)
+            love.graphics.print(hint, x + w / 2 - hint_w / 2, y + 160)
+            
+            -- 恢复默认字体
+            love.graphics.setFont(love.graphics.newFont(16))
         end
         
         -- 底部提示
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
-        local hint = "点击己方棋子选中 | 绿点可走 | 红圈可吃 | R 重置游戏 | 2 返回菜单"
+        local hint = "点击己方棋子选中 | 绿点可走 | 红圈可吃 | U 悔棋 | R 重开 | 2 返回菜单"
         local hint_width = love.graphics.getFont():getWidth(hint)
         love.graphics.print(hint, (love.graphics.getWidth() - hint_width) / 2, love.graphics.getHeight() - 30)
     end)

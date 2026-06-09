@@ -17,11 +17,16 @@ local Rules = {}
         piece (Piece) - 要走的棋子
         to_col, to_row (number) - 目标位置
         game_state (GameState) - 游戏状态，用来查其他棋子
+        check_self_check (boolean) - 是否检查自将（走了之后自己会不会被将军），默认true
     返回：
         valid (boolean) - 是否合法
         reason (string) - 不合法的原因（调试用）
 ]]
-function Rules.is_valid_move(piece, to_col, to_row, game_state)
+function Rules.is_valid_move(piece, to_col, to_row, game_state, check_self_check)
+    if check_self_check == nil then
+        check_self_check = true  -- 默认检查自将
+    end
+    
     if not piece or not piece.alive then
         return false, "棋子不存在或已被吃"
     end
@@ -66,7 +71,18 @@ function Rules.is_valid_move(piece, to_col, to_row, game_state)
         return false, "未知棋子类型"
     end
     
-    return valid, reason
+    if not valid then
+        return false, reason
+    end
+    
+    -- 如果需要检查自将，模拟走一下，看看会不会被将军
+    if check_self_check then
+        if Rules._would_be_in_check(piece, to_col, to_row, game_state) then
+            return false, "走子后会被将军（不能送将）"
+        end
+    end
+    
+    return true
 end
 
 --[[
@@ -414,6 +430,150 @@ function Rules.is_in_check(color, game_state)
     end
     
     return #checking_pieces > 0, checking_pieces
+end
+
+--[[
+    检查两个将是否对脸（飞将）
+    参数：
+        game_state (GameState) - 游戏状态
+    返回：
+        facing (boolean) - 是否对脸
+]]
+function Rules.kings_are_facing(game_state)
+    local red_king = game_state:get_king("red")
+    local black_king = game_state:get_king("black")
+    
+    if not red_king or not black_king then
+        return false  -- 有一个将没了，不存在对脸
+    end
+    
+    -- 必须在同一列
+    if red_king.col ~= black_king.col then
+        return false
+    end
+    
+    -- 中间有没有棋子
+    local min_row = math.min(red_king.row, black_king.row)
+    local max_row = math.max(red_king.row, black_king.row)
+    
+    for row = min_row + 1, max_row - 1 do
+        if game_state:get_piece_at(red_king.col, row) then
+            return false  -- 中间有棋子，不对脸
+        end
+    end
+    
+    return true  -- 同列且中间没子，将帅对脸
+end
+
+--[[
+    模拟走一步，看看走了之后己方会不会被将军
+    参数：
+        piece (Piece) - 要走的棋子
+        to_col, to_row (number) - 目标位置
+        game_state (GameState) - 游戏状态
+    返回：
+        in_check (boolean) - 走了之后是否会被将军
+]]
+function Rules._would_be_in_check(piece, to_col, to_row, game_state)
+    local from_col = piece.col
+    local from_row = piece.row
+    local color = piece.color
+    
+    -- 目标位置的棋子（会被吃掉）
+    local target_piece = game_state:get_piece_at(to_col, to_row)
+    
+    -- ===== 模拟走子 =====
+    -- 1. 从原位置移除
+    game_state.board[from_col][from_row] = nil
+    
+    -- 2. 放到新位置
+    game_state.board[to_col][to_row] = piece
+    
+    -- 3. 临时更新piece的坐标
+    piece.col = to_col
+    piece.row = to_row
+    
+    -- 4. 如果目标位置有棋子，先标记一下（暂时不真删，后面恢复）
+    if target_piece then
+        target_piece.alive = false
+    end
+    
+    -- ===== 检查会不会被将军 =====
+    -- 检查将军 或者 将帅对脸
+    local in_check = Rules.is_in_check(color, game_state) or Rules.kings_are_facing(game_state)
+    
+    -- ===== 恢复原状 =====
+    -- 1. 恢复piece坐标
+    piece.col = from_col
+    piece.row = from_row
+    
+    -- 2. 恢复原位置
+    game_state.board[from_col][from_row] = piece
+    
+    -- 3. 恢复目标位置
+    if target_piece then
+        game_state.board[to_col][to_row] = target_piece
+        target_piece.alive = true
+    else
+        game_state.board[to_col][to_row] = nil
+    end
+    
+    return in_check
+end
+
+--[[
+    检查某一方是否将死（被将军且没有任何解法）
+    参数：
+        color (string) - 要检查的一方
+        game_state (GameState) - 游戏状态
+    返回：
+        checkmate (boolean) - 是否将死
+]]
+function Rules.is_checkmate(color, game_state)
+    -- 首先得是被将军状态
+    if not Rules.is_in_check(color, game_state) then
+        return false
+    end
+    
+    -- 看看有没有任何一步棋可以解将
+    local pieces = game_state:get_pieces_by_color(color)
+    for _, piece in ipairs(pieces) do
+        local moves = Rules.get_valid_moves(piece, game_state)
+        if #moves > 0 then
+            -- 有能走的棋，就没被将死
+            return false
+        end
+    end
+    
+    -- 所有棋子都没有合法走法，就是将死了
+    return true
+end
+
+--[[
+    检查某一方是否困毙（没被将军但无路可走）
+    参数：
+        color (string) - 要检查的一方
+        game_state (GameState) - 游戏状态
+    返回：
+        stalemate (boolean) - 是否困毙
+]]
+function Rules.is_stalemate(color, game_state)
+    -- 首先不能是被将军
+    if Rules.is_in_check(color, game_state) then
+        return false
+    end
+    
+    -- 看看有没有任何一步可以走
+    local pieces = game_state:get_pieces_by_color(color)
+    for _, piece in ipairs(pieces) do
+        local moves = Rules.get_valid_moves(piece, game_state)
+        if #moves > 0 then
+            return false  -- 有能走的棋，没困毙
+        end
+    end
+    
+    -- 所有棋子都走不动，就是困毙
+    return true
 end
 
 Logger.info("走法规则模块加载完成")
