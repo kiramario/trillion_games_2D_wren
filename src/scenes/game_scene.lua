@@ -11,7 +11,10 @@ local Logger = require("core.logger")
 local EventBus = require("core.event_bus")
 local RenderSystem = require("systems.render_system")
 local InputSystem = require("systems.input_system")
+local CameraSystem = require("systems.camera_system")
+local Board = require("entities.board")
 local Config = require("core.config")
+local Utils = require("core.utils")
 
 -- 游戏场景类，继承自BaseScene
 local GameScene = {}
@@ -34,6 +37,16 @@ function GameScene.new()
     self._mouse_x = 0
     self._mouse_y = 0
     
+    -- 鼠标对应的棋盘坐标
+    self._hover_col = 0
+    self._hover_row = 0
+    
+    -- 相机
+    self._camera = nil
+    
+    -- 棋盘
+    self._board = nil
+    
     return self
 end
 
@@ -45,6 +58,15 @@ function GameScene:enter(params)
     
     Logger.info("游戏场景初始化")
     
+    -- 初始化相机
+    self._camera = CameraSystem.new()
+    self._camera:set_viewport(love.graphics.getWidth(), love.graphics.getHeight())
+    
+    -- 初始化棋盘
+    self._board = Board.new()
+    -- 自适应窗口
+    self._board:fit_to_window(love.graphics.getWidth(), love.graphics.getHeight())
+    
     -- 订阅鼠标事件
     self._mouse_press_callback = function(data)
         self:_on_mouse_press(data)
@@ -54,6 +76,12 @@ function GameScene:enter(params)
     self._mouse_move_callback = function(data)
         self._mouse_x = data.x
         self._mouse_y = data.y
+        -- 更新鼠标对应的棋盘坐标
+        if self._board then
+            local col, row = self._board:screen_to_board(data.x, data.y)
+            self._hover_col = col
+            self._hover_row = row
+        end
     end
     EventBus:subscribe("input_mouse_move", self._mouse_move_callback)
     
@@ -62,6 +90,12 @@ function GameScene:enter(params)
         self:_on_key_press(data)
     end
     EventBus:subscribe("input_key_pressed", self._key_press_callback)
+    
+    -- 订阅滚轮回调
+    self._wheel_callback = function(data)
+        self:_on_wheel(data)
+    end
+    EventBus:subscribe("input_wheel_moved", self._wheel_callback)
 end
 
 --[[
@@ -74,6 +108,7 @@ function GameScene:exit()
     EventBus:unsubscribe("input_mouse_left_pressed", self._mouse_press_callback)
     EventBus:unsubscribe("input_mouse_move", self._mouse_move_callback)
     EventBus:unsubscribe("input_key_pressed", self._key_press_callback)
+    EventBus:unsubscribe("input_wheel_moved", self._wheel_callback)
     
     Logger.info("游戏场景清理完成")
 end
@@ -115,12 +150,57 @@ function GameScene:_on_key_press(data)
         self._click_points = {}
         Logger.info("清除所有点击点")
     end
+    
+    -- 按r重置棋盘大小
+    if key == "r" then
+        self._board:fit_to_window(love.graphics.getWidth(), love.graphics.getHeight())
+        Logger.info("重置棋盘大小")
+    end
+    
+    -- 按s相机震动测试
+    if key == "s" then
+        self._camera:shake(10, 0.5)
+        Logger.info("相机震动测试")
+    end
+end
+
+--[[
+    鼠标滚轮处理
+]]
+function GameScene:_on_wheel(data)
+    -- 滚轮缩放棋盘（测试用）
+    if self._board then
+        local delta = data.y * 5
+        local new_size = self._board.cell_size + delta
+        new_size = Utils.clamp(new_size, 20, 150)
+        self._board:set_cell_size(new_size)
+        self._board.x = love.graphics.getWidth() / 2
+        self._board.y = love.graphics.getHeight() / 2
+        Logger.debug("格子大小调整为：" .. new_size .. "px")
+    end
+end
+
+--[[
+    窗口大小改变
+]]
+function GameScene:resize(w, h)
+    if self._board then
+        self._board:fit_to_window(w, h)
+    end
+    if self._camera then
+        self._camera:set_viewport(w, h)
+    end
 end
 
 --[[
     更新
 ]]
 function GameScene:update(dt)
+    -- 更新相机
+    if self._camera then
+        self._camera:update(dt)
+    end
+    
     -- 更新点击点的时间，做淡出效果
     for i = #self._click_points, 1, -1 do
         local point = self._click_points[i]
@@ -143,51 +223,20 @@ function GameScene:draw()
         -- 背景色（游戏场景的背景跟菜单不一样，区分一下）
         love.graphics.setColor(0.08, 0.1, 0.12, 1)
         love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
-        
-        -- 画个棋盘占位，V0先用简单的格子
-        -- 后面V0.1会换成真正的象棋棋盘
-        love.graphics.setColor(0.2, 0.25, 0.2, 1)
-        local board_size = math.min(love.graphics.getWidth(), love.graphics.getHeight()) * 0.8
-        local board_x = (love.graphics.getWidth() - board_size) / 2
-        local board_y = (love.graphics.getHeight() - board_size) / 2
-        
-        -- 画棋盘边框
-        love.graphics.setColor(0.4, 0.5, 0.4, 1)
-        love.graphics.rectangle("line", board_x, board_y, board_size, board_size)
-        
-        -- 画网格线（9x10，象棋是9列10行）
-        local cols = 9
-        local rows = 10
-        local cell_w = board_size / cols
-        local cell_h = board_size / rows
-        
-        love.graphics.setColor(0.3, 0.35, 0.3, 1)
-        -- 竖线
-        for i = 0, cols do
-            local x = board_x + i * cell_w
-            love.graphics.line(x, board_y, x, board_y + board_size)
-        end
-        -- 横线
-        for j = 0, rows do
-            local y = board_y + j * cell_h
-            love.graphics.line(board_x, y, board_x + board_size, y)
-        end
-        
-        -- 楚河汉界文字（占位）
-        love.graphics.setColor(0.5, 0.6, 0.5, 1)
-        local river_font = love.graphics.newFont(32)
-        love.graphics.setFont(river_font)
-        local river_text = "楚河        汉界"
-        local river_width = river_font:getWidth(river_text)
-        local river_y = board_y + board_size / 2 - river_font:getHeight() / 2
-        love.graphics.print(river_text, (love.graphics.getWidth() - river_width) / 2, river_y)
-        
-        -- 恢复默认字体
-        love.graphics.setFont(love.graphics.newFont(16))
     end)
     
     -- ===== 游戏层 =====
     RenderSystem:add_to_layer("GAME", function()
+        -- 相机变换内绘制游戏内容
+        if self._camera then
+            self._camera:begin()
+        end
+        
+        -- 绘制棋盘
+        if self._board then
+            self._board:draw()
+        end
+        
         -- 画点击的点（测试用，后面换成棋子）
         for _, point in ipairs(self._click_points) do
             -- 透明度随时间减少，淡出效果
@@ -197,20 +246,45 @@ function GameScene:draw()
             love.graphics.setColor(1, 1, 1, alpha)
             love.graphics.circle("line", point.x, point.y, 8)
         end
+        
+        -- 鼠标悬停的棋盘位置标记
+        if self._board then
+            local col = math.floor(self._hover_col + 0.5)
+            local row = math.floor(self._hover_row + 0.5)
+            if self._board:is_valid_position(col, row) then
+                local x, y = self._board:board_to_screen(col, row)
+                love.graphics.setColor(1, 1, 0, 0.5)
+                love.graphics.circle("fill", x, y, 10)
+            end
+        end
+        
+        if self._camera then
+            self._camera:finish()
+        end
     end)
     
     -- ===== UI层 =====
     RenderSystem:add_to_layer("UI", function()
         -- 左上角信息
         love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.print("游戏场景 (GameScene) - V0 测试版", 10, 10)
+        love.graphics.print("游戏场景 (GameScene) - V0.1 棋盘版", 10, 10)
         love.graphics.print("FPS: " .. tostring(love.timer.getFPS()), 10, 30)
         love.graphics.print("鼠标位置: " .. math.floor(self._mouse_x) .. ", " .. math.floor(self._mouse_y), 10, 50)
         love.graphics.print("点击次数: " .. #self._click_points, 10, 70)
         
+        -- 棋盘坐标
+        if self._board then
+            local col = math.floor(self._hover_col + 0.5)
+            local row = math.floor(self._hover_row + 0.5)
+            local valid = self._board:is_valid_position(col, row) and "有效" or "棋盘外"
+            love.graphics.print(string.format("棋盘坐标: (%.1f, %.1f) → 格子(%d, %d) %s", 
+                self._hover_col, self._hover_row, col, row, valid), 10, 90)
+            love.graphics.print("格子大小: " .. self._board.cell_size .. "px", 10, 110)
+        end
+        
         -- 底部提示
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
-        local hint = "点击鼠标画点 | 按 C 清除 | 按 2 返回菜单"
+        local hint = "鼠标滚轮缩放棋盘 | 按 R 重置大小 | 按 S 相机震动测试 | 按 2 返回菜单"
         local hint_width = love.graphics.getFont():getWidth(hint)
         love.graphics.print(hint, (love.graphics.getWidth() - hint_width) / 2, love.graphics.getHeight() - 30)
     end)

@@ -1,171 +1,175 @@
--- ============================================================================
--- 配置管理器
--- 功能：集中管理所有配置项，支持默认配置和运行时修改
--- 类比：JS 的 config 对象，Java 的 application.yml，Python 的 config.py
--- ============================================================================
+--[[
+    文件名：config.lua
+    功能：全局配置管理，所有可调参数集中在这里
+    类比：相当于 JS 的 config.js，或 Python 的 settings.py
+    作者：wren
+    创建日期：2026-06-09
+    依赖：core.logger
+]]
 
-local Utils = require("core.utils")
+local Logger = require("core.logger")
 
 local Config = {}
-Config.__index = Config
 
--- 默认配置
-local DEFAULT_CONFIG = {
-  -- 窗口配置
-  window = {
-    width = 960,
-    height = 640,
-    title = "Trillion Games 2D",
-    fullscreen = false,
-    resizable = true,
-    vsync = true
-  },
+--[[
+    配置分模块组织，每个模块一个子表
+    好处：分类清晰，不会乱
+    类比：Java里按类分配置，或者yaml配置文件的层级结构
+]]
 
-  -- 游戏配置
-  game = {
-    debug_mode = false,
-    language = "zh-CN"
-  },
-
-  -- 音频配置
-  audio = {
-    master_volume = 1.0,
-    sound_volume = 1.0,
-    music_volume = 0.7,
-    sound_enabled = true,
-    music_enabled = true
-  },
-
-  -- 输入配置
-  input = {
-    -- 按键映射
-    key_map = {
-      cancel = "escape",
-      confirm = "return",
-      up = "w",
-      down = "s",
-      left = "a",
-      right = "d"
-    }
-  },
-
-  -- 渲染配置
-  render = {
-    max_particles = 1000,
-    enable_particles = true,
-    enable_shadows = true,
-    bloom_effect = false
-  }
+-- 图形相关配置
+Config.graphics = {
+    -- 背景色（RGBA，取值0-1）
+    -- 类比：CSS的rgba，只是取值范围是0-1不是0-255
+    background_color = {0.1, 0.12, 0.15, 1},
+    
+    -- 默认字体大小
+    default_font_size = 16,
+    
+    -- 是否开启垂直同步
+    vsync = true,
+    
+    -- 目标帧率
+    target_fps = 60,
 }
 
--- ============================================================================
--- 创建配置管理器
--- @param table user_config 用户自定义配置，会覆盖默认配置
--- @return Config
--- ============================================================================
-function Config.new(user_config)
-  local self = setmetatable({}, Config)
+-- 渲染层配置（分层渲染，层级顺序在这里定义）
+-- 数字越小越先绘制（在下面），数字越大越晚绘制（在上面）
+-- 类比：CSS的z-index，或Photoshop的图层顺序
+Config.render_layers = {
+    BACKGROUND = 1,   -- 背景层（最底层）
+    GAME = 2,         -- 游戏内容层
+    EFFECT = 3,       -- 特效层（粒子、光影等）
+    UI = 4,           -- UI层（按钮、文字等）
+    DEBUG = 5,        -- 调试信息层（最上层）
+}
 
-  -- 深拷贝默认配置
-  self.config = Utils.deep_copy(DEFAULT_CONFIG)
+-- 日志配置
+Config.log = {
+    -- 日志级别：DEBUG / INFO / WARN / ERROR
+    level = "DEBUG",
+}
 
-  -- 如果有用户配置，合并进去
-  if user_config then
-    self:merge(user_config)
-  end
+-- 输入配置
+Config.input = {
+    -- 是否启用鼠标
+    mouse_enabled = true,
+    -- 是否启用键盘
+    keyboard_enabled = true,
+}
 
-  return self
-end
+-- 游戏相关配置
+Config.game = {
+    -- 游戏名称
+    name = "中国象棋",
+    -- 版本号
+    version = "0.1.0",
+}
 
--- ============================================================================
--- 获取配置项
--- 支持点号路径，比如 config:get("window.width")
--- 类比：JS 的 lodash.get
--- ============================================================================
-function Config:get(key_path, default_value)
-  local keys = Utils.split(key_path, ".")
-  local value = self.config
+-- 棋盘相关配置
+Config.board = {
+    -- 棋盘格子默认大小
+    default_cell_size = 60,
+    -- 窗口边距比例
+    padding_ratio = 0.1,
+}
 
-  for _, key in ipairs(keys) do
-    if type(value) ~= "table" or value[key] == nil then
-      return default_value
+--[[
+    获取配置项
+    支持用点分隔的路径，比如 "graphics.background_color"
+    参数：
+        path (string) - 配置路径，用点分隔
+        default (any) - 找不到时的默认值，可选
+    返回：配置值
+    示例：Config.get("graphics.background_color")
+]]
+function Config.get(path, default)
+    -- 按点分割路径
+    -- 类比：JS里的 lodash.get() 函数
+    local keys = {}
+    for key in string.gmatch(path, "([^%.]+)") do
+        table.insert(keys, key)
     end
-    value = value[key]
-  end
-
-  return value
-end
-
--- ============================================================================
--- 设置配置项
--- 也支持点号路径
--- ============================================================================
-function Config:set(key_path, value)
-  local keys = Utils.split(key_path, ".")
-  local current = self.config
-
-  -- 找到最后一个父级
-  for i = 1, #keys - 1 do
-    local key = keys[i]
-    if type(current[key]) ~= "table" then
-      current[key] = {}
+    
+    local current = Config
+    for _, key in ipairs(keys) do
+        if current[key] ~= nil then
+            current = current[key]
+        else
+            -- 找不到，返回默认值
+            if default ~= nil then
+                return default
+            else
+                Logger.warn("配置项不存在：" .. path)
+                return nil
+            end
+        end
     end
-    current = current[key]
-  end
-
-  -- 设置值
-  local last_key = keys[#keys]
-  current[last_key] = value
+    
+    return current
 end
 
--- ============================================================================
--- 合并另一个配置表
--- 类比：JS 的 Object.assign，深合并
--- ============================================================================
-function Config:merge(another_config)
-  local function merge_tables(t1, t2)
-    for k, v in pairs(t2) do
-      if type(v) == "table" and type(t1[k]) == "table" then
-        merge_tables(t1[k], v)
-      else
-        t1[k] = v
-      end
+--[[
+    设置配置项
+    支持点分隔路径
+    参数：
+        path (string) - 配置路径
+        value (any) - 要设置的值
+    示例：Config.set("log.level", "INFO")
+]]
+function Config.set(path, value)
+    local keys = {}
+    for key in string.gmatch(path, "([^%.]+)") do
+        table.insert(keys, key)
     end
-  end
-
-  merge_tables(self.config, another_config)
+    
+    if #keys == 0 then
+        Logger.warn("无效的配置路径：" .. tostring(path))
+        return
+    end
+    
+    local current = Config
+    -- 遍历到倒数第二个key
+    for i = 1, #keys - 1 do
+        local key = keys[i]
+        if current[key] == nil then
+            -- 不存在就创建新的表
+            current[key] = {}
+        end
+        if type(current[key]) ~= "table" then
+            Logger.warn("配置路径错误，中间项不是table：" .. path)
+            return
+        end
+        current = current[key]
+    end
+    
+    -- 设置最后一个key的值
+    local last_key = keys[#keys]
+    current[last_key] = value
+    Logger.debug("配置项已更新：" .. path .. " = " .. tostring(value))
 end
 
--- ============================================================================
--- 获取整个配置表（只读，请勿修改）
--- ============================================================================
-function Config:get_all()
-  return self.config
+--[[
+    打印所有配置（调试用）
+]]
+function Config.dump()
+    Logger.debug("=== 当前配置 ===")
+    -- 简单递归打印
+    local function dump_table(t, indent)
+        indent = indent or ""
+        for k, v in pairs(t) do
+            if type(v) == "table" then
+                Logger.debug(indent .. k .. ":")
+                dump_table(v, indent .. "  ")
+            else
+                Logger.debug(indent .. k .. " = " .. tostring(v))
+            end
+        end
+    end
+    dump_table(Config)
+    Logger.debug("================")
 end
 
--- ============================================================================
--- 重设置为默认配置
--- ============================================================================
-function Config:reset()
-  self.config = Utils.deep_copy(DEFAULT_CONFIG)
-end
-
--- ============================================================================
--- 全局默认配置实例
--- ============================================================================
-local _default_config = Config.new()
-
-function Config.get_default()
-  return _default_config
-end
-
--- 快捷方式，直接用 Config.get / Config.set
-function Config.get(key_path, default_value)
-  return _default_config:get(key_path, default_value)
-end
-
-function Config.set(key_path, value)
-  _default_config:set(key_path, value)
-end
+Logger.info("配置系统初始化完成")
 
 return Config
