@@ -1,0 +1,38 @@
+# 构建产物
+build/
+dist/
+*.love
+*.exe
+*.app
+*.dmg
+*.apk
+
+# 存档和日志
+saves/
+logs/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+
+# Lua 相关
+*.luac
+*.so
+*.dylib
+*.dll
+
+# LÖVE2D 缓存
+.love/
