@@ -1,188 +1,371 @@
---[[
-    文件名：resource_manager.lua
-    功能：资源管理器，统一加载和缓存图片、音效、字体等资源
-    类比：相当于浏览器的资源缓存，或 Unity 的 Resources 系统
-    作者：wren
-    创建日期：2026-06-09
-    依赖：core.logger
-]]
+-- ============================================================================
+-- 资源管理器
+-- 功能：管理图片、音效、字体等资源的加载和缓存，避免重复加载
+-- 类比：Web 的资源预加载，Unity 的 Resources 系统，游戏的资源池
+-- 说明：LÖVE2D 加载资源是有开销的，加载过的缓存起来，下次直接用
+-- ============================================================================
 
-local Logger = require("core.logger")
+local Logger = require("src.core.logger")
+local Utils = require("src.core.utils")
 
 local ResourceManager = {}
+ResourceManager.__index = ResourceManager
 
--- 资源缓存，key是路径，value是资源对象
-ResourceManager._cache = {
-    images = {},
-    sounds = {},
-    fonts = {},
-    -- 后续可以加其他类型：shaders, data等
-}
+-- ============================================================================
+-- 创建资源管理器
+-- @return ResourceManager
+-- ============================================================================
+function ResourceManager.new()
+  local self = setmetatable({}, ResourceManager)
 
--- 资源基础路径
--- 这样后面改目录结构不用到处改路径
-ResourceManager._paths = {
-    images = "assets/images/",
-    sounds = "assets/sounds/",
-    fonts = "assets/fonts/",
-}
+  -- 缓存
+  self.images = {}      -- 图片缓存
+  self.sounds = {}      -- 音效缓存（短音效，static 类型）
+  self.music = {}       -- 音乐缓存（长音乐，stream 类型）
+  self.fonts = {}       -- 字体缓存
+  self.shaders = {}     -- 着色器缓存
 
---[[
-    加载图片，有缓存直接返回缓存的
-    参数：
-        path (string) - 图片路径，相对于 images 目录
-    返回：Image 对象（LÖVE2D的Image）
-    示例：local img = ResourceManager:load_image("board.png")
-]]
-function ResourceManager:load_image(path)
-    -- 检查缓存
-    if self._cache.images[path] then
-        Logger.debug("图片命中缓存：" .. path)
-        return self._cache.images[path]
-    end
-    
-    -- 完整路径
-    local full_path = self._paths.images .. path
-    Logger.debug("加载图片：" .. full_path)
-    
-    -- 用pcall保护，加载失败不崩溃
-    local ok, image = pcall(function()
-        return love.graphics.newImage(full_path)
-    end)
-    
-    if not ok then
-        Logger.error("图片加载失败：" .. full_path .. "，错误：" .. tostring(image))
-        return nil
-    end
-    
-    -- 存入缓存
-    self._cache.images[path] = image
-    return image
+  -- 资源根目录
+  self.image_dir = "assets/images/"
+  self.sound_dir = "assets/sounds/"
+  self.music_dir = "assets/music/"
+  self.font_dir = "assets/fonts/"
+
+  -- 统计
+  self.total_loaded = 0
+  self.total_failed = 0
+
+  self.logger = Logger.get_default()
+
+  return self
 end
 
---[[
-    加载音效，有缓存直接返回
-    参数：
-        path (string) - 音效路径，相对于 sounds 目录
-        type (string) - 类型，"static"（短音效）或 "stream"（长音乐），默认static
-    返回：Source 对象
-]]
-function ResourceManager:load_sound(path, sound_type)
-    sound_type = sound_type or "static"
-    
-    -- 缓存key要包含类型，因为同一个文件不同类型是不同的对象
-    local cache_key = path .. "_" .. sound_type
-    if self._cache.sounds[cache_key] then
-        Logger.debug("音效命中缓存：" .. path)
-        return self._cache.sounds[cache_key]
-    end
-    
-    local full_path = self._paths.sounds .. path
-    Logger.debug("加载音效：" .. full_path)
-    
-    local ok, source = pcall(function()
-        return love.audio.newSource(full_path, sound_type)
-    end)
-    
-    if not ok then
-        Logger.error("音效加载失败：" .. full_path .. "，错误：" .. tostring(source))
-        return nil
-    end
-    
-    self._cache.sounds[cache_key] = source
-    return source
+-- ============================================================================
+-- 初始化
+-- ============================================================================
+function ResourceManager:init()
+  self.logger:info("[ResourceManager] Initialized")
 end
 
---[[
-    加载字体，有缓存直接返回
-    参数：
-        path (string) - 字体路径，相对于 fonts 目录；可以是 nil 表示默认字体
-        size (number) - 字体大小，默认16
-    返回：Font 对象
-    说明：同一个字体不同大小是不同的对象，所以缓存key要包含大小
-]]
-function ResourceManager:load_font(path, size)
-    size = size or 16
-    
-    -- 缓存key
-    local cache_key = (path or "default") .. "_" .. size
-    if self._cache.fonts[cache_key] then
-        Logger.debug("字体命中缓存：" .. tostring(path) .. "，大小：" .. size)
-        return self._cache.fonts[cache_key]
+-- ============================================================================
+-- 加载图片
+-- @param string name 图片名称（不带路径和扩展名）
+-- @param string path  完整路径（可选，默认从 image_dir 找）
+-- @return userdata|nil Image 对象
+-- ============================================================================
+function ResourceManager:load_image(name, path)
+  -- 已经缓存了，直接返回
+  if self.images[name] then
+    return self.images[name]
+  end
+
+  -- 没传路径的话，自动拼路径
+  if not path then
+    -- 尝试几种常见扩展名
+    local exts = {".png", ".jpg", ".jpeg", ".bmp"}
+    for _, ext in ipairs(exts) do
+      local full_path = self.image_dir .. name .. ext
+      if love and love.filesystem and love.filesystem.getInfo(full_path) then
+        path = full_path
+        break
+      end
     end
-    
-    local font
+    -- 都没找到的话，用 png 试试，可能会报错
+    if not path then
+      path = self.image_dir .. name .. ".png"
+    end
+  end
+
+  -- 加载
+  local image = nil
+  local ok, err = pcall(function()
+    image = love.graphics.newImage(path)
+  end)
+
+  if not ok or not image then
+    self.logger:error("[ResourceManager] Failed to load image: " .. name .. " - " .. tostring(err))
+    self.total_failed = self.total_failed + 1
+    return nil
+  end
+
+  -- 缓存起来
+  self.images[name] = image
+  self.total_loaded = self.total_loaded + 1
+  self.logger:debug("[ResourceManager] Loaded image: " .. name)
+
+  return image
+end
+
+-- ============================================================================
+-- 获取已加载的图片
+-- ============================================================================
+function ResourceManager:get_image(name)
+  return self.images[name]
+end
+
+-- ============================================================================
+-- 加载音效（短音效，加载到内存）
+-- ============================================================================
+function ResourceManager:load_sound(name, path)
+  if self.sounds[name] then
+    return self.sounds[name]
+  end
+
+  if not path then
+    local exts = {".wav", ".ogg", ".mp3"}
+    for _, ext in ipairs(exts) do
+      local full_path = self.sound_dir .. name .. ext
+      if love and love.filesystem and love.filesystem.getInfo(full_path) then
+        path = full_path
+        break
+      end
+    end
+    if not path then
+      path = self.sound_dir .. name .. ".ogg"
+    end
+  end
+
+  local sound = nil
+  local ok, err = pcall(function()
+    sound = love.audio.newSource(path, "static")  -- static = 加载到内存
+  end)
+
+  if not ok or not sound then
+    self.logger:error("[ResourceManager] Failed to load sound: " .. name .. " - " .. tostring(err))
+    self.total_failed = self.total_failed + 1
+    return nil
+  end
+
+  self.sounds[name] = sound
+  self.total_loaded = self.total_loaded + 1
+  self.logger:debug("[ResourceManager] Loaded sound: " .. name)
+
+  return sound
+end
+
+function ResourceManager:get_sound(name)
+  return self.sounds[name]
+end
+
+-- ============================================================================
+-- 加载音乐（长音乐，流式播放，不全部加载到内存）
+-- ============================================================================
+function ResourceManager:load_music(name, path)
+  if self.music[name] then
+    return self.music[name]
+  end
+
+  if not path then
+    local exts = {".ogg", ".mp3", ".wav"}
+    for _, ext in ipairs(exts) do
+      local full_path = self.music_dir .. name .. ext
+      if love and love.filesystem and love.filesystem.getInfo(full_path) then
+        path = full_path
+        break
+      end
+    end
+    if not path then
+      path = self.music_dir .. name .. ".ogg"
+    end
+  end
+
+  local music = nil
+  local ok, err = pcall(function()
+    music = love.audio.newSource(path, "stream")  -- stream = 流式加载
+  end)
+
+  if not ok or not music then
+    self.logger:error("[ResourceManager] Failed to load music: " .. name .. " - " .. tostring(err))
+    self.total_failed = self.total_failed + 1
+    return nil
+  end
+
+  self.music[name] = music
+  self.total_loaded = self.total_loaded + 1
+  self.logger:debug("[ResourceManager] Loaded music: " .. name)
+
+  return music
+end
+
+function ResourceManager:get_music(name)
+  return self.music[name]
+end
+
+-- ============================================================================
+-- 加载字体
+-- @param string name 字体名
+-- @param number size 字体大小
+-- ============================================================================
+function ResourceManager:load_font(name, size, path)
+  size = size or 14
+  local cache_key = name .. "_" .. size
+
+  if self.fonts[cache_key] then
+    return self.fonts[cache_key]
+  end
+
+  if not path then
+    local exts = {".ttf", ".otf"}
+    for _, ext in ipairs(exts) do
+      local full_path = self.font_dir .. name .. ext
+      if love and love.filesystem and love.filesystem.getInfo(full_path) then
+        path = full_path
+        break
+      end
+    end
+  end
+
+  local font = nil
+  local ok, err = pcall(function()
     if path then
-        -- 加载自定义字体
-        local full_path = self._paths.fonts .. path
-        Logger.debug("加载字体：" .. full_path .. "，大小：" .. size)
-        
-        local ok, loaded_font = pcall(function()
-            return love.graphics.newFont(full_path, size)
-        end)
-        
-        if not ok then
-            Logger.error("字体加载失败：" .. full_path .. "，错误：" .. tostring(loaded_font))
-            Logger.warn("使用默认字体代替")
-            font = love.graphics.newFont(size)
-        else
-            font = loaded_font
-        end
+      font = love.graphics.newFont(path, size)
     else
-        -- 使用默认字体
-        Logger.debug("加载默认字体，大小：" .. size)
-        font = love.graphics.newFont(size)
+      -- 没有找到字体文件，用默认字体
+      font = love.graphics.newFont(size)
     end
-    
-    self._cache.fonts[cache_key] = font
-    return font
+  end)
+
+  if not ok or not font then
+    self.logger:error("[ResourceManager] Failed to load font: " .. name .. " - " .. tostring(err))
+    -- 失败了就用默认字体
+    font = love.graphics.newFont(size)
+  end
+
+  self.fonts[cache_key] = font
+  self.total_loaded = self.total_loaded + 1
+  self.logger:debug("[ResourceManager] Loaded font: " .. name .. " size: " .. size)
+
+  return font
 end
 
---[[
-    卸载图片资源
-    参数：
-        path (string) - 图片路径
-]]
-function ResourceManager:unload_image(path)
-    if self._cache.images[path] then
-        -- LÖVE2D的Image对象会自动被GC释放，这里只要把引用清掉就行
-        self._cache.images[path] = nil
-        Logger.debug("卸载图片：" .. path)
-    end
+function ResourceManager:get_font(name, size)
+  size = size or 14
+  return self.fonts[name .. "_" .. size]
 end
 
---[[
-    卸载所有某类型的资源
-    参数：
-        type (string) - 资源类型："images", "sounds", "fonts"；不传就卸载所有
-]]
-function ResourceManager:unload_all(resource_type)
-    if resource_type then
-        if self._cache[resource_type] then
-            self._cache[resource_type] = {}
-            Logger.debug("卸载所有" .. resource_type .. "资源")
-        end
-    else
-        -- 卸载所有
-        for k, _ in pairs(self._cache) do
-            self._cache[k] = {}
-        end
-        Logger.debug("卸载所有资源")
+-- ============================================================================
+-- 预加载一组资源
+-- @param table resources 资源列表，格式：{ type = "image", name = "player" }
+-- ============================================================================
+function ResourceManager:preload(resources)
+  local total = #resources
+  local loaded = 0
+
+  for _, res in ipairs(resources) do
+    if res.type == "image" then
+      self:load_image(res.name, res.path)
+    elseif res.type == "sound" then
+      self:load_sound(res.name, res.path)
+    elseif res.type == "music" then
+      self:load_music(res.name, res.path)
+    elseif res.type == "font" then
+      self:load_font(res.name, res.size, res.path)
     end
+    loaded = loaded + 1
+  end
+
+  self.logger:info(string.format("[ResourceManager] Preloaded %d/%d resources", loaded, total))
 end
 
---[[
-    获取缓存统计信息（调试用）
-    返回：各类型资源的数量
-]]
-function ResourceManager:get_cache_stats()
-    local stats = {}
-    for type_name, cache in pairs(self._cache) do
-        stats[type_name] = Utils and Utils.table_length and Utils.table_length(cache) or 0
+-- ============================================================================
+-- 卸载某个资源
+-- ============================================================================
+function ResourceManager:unload(type, name)
+  if type == "image" then
+    self.images[name] = nil
+  elseif type == "sound" then
+    if self.sounds[name] and self.sounds[name].release then
+      self.sounds[name]:release()
     end
-    return stats
+    self.sounds[name] = nil
+  elseif type == "music" then
+    if self.music[name] and self.music[name].release then
+      self.music[name]:release()
+    end
+    self.music[name] = nil
+  elseif type == "font" then
+    self.fonts[name] = nil
+  end
+  self.logger:debug("[ResourceManager] Unloaded resource: " .. type .. "/" .. name)
 end
 
-Logger.info("资源管理器初始化完成")
+-- ============================================================================
+-- 卸载所有资源
+-- ============================================================================
+function ResourceManager:unload_all()
+  -- 释放所有音源
+  for name, sound in pairs(self.sounds) do
+    if sound.release then sound:release() end
+  end
+  for name, music in pairs(self.music) do
+    if music.release then music:release() end
+  end
+
+  self.images = {}
+  self.sounds = {}
+  self.music = {}
+  self.fonts = {}
+  self.shaders = {}
+
+  self.total_loaded = 0
+  self.total_failed = 0
+
+  self.logger:info("[ResourceManager] All resources unloaded")
+end
+
+-- ============================================================================
+-- 获取加载统计
+-- ============================================================================
+function ResourceManager:get_stats()
+  return {
+    images = Utils.table_length(self.images),
+    sounds = Utils.table_length(self.sounds),
+    music = Utils.table_length(self.music),
+    fonts = Utils.table_length(self.fonts),
+    total_loaded = self.total_loaded,
+    total_failed = self.total_failed
+  }
+end
+
+-- ============================================================================
+-- 全局默认资源管理器实例
+-- ============================================================================
+local _default_manager = nil
+
+function ResourceManager.get_default()
+  if not _default_manager then
+    _default_manager = ResourceManager.new()
+  end
+  return _default_manager
+end
+
+-- 快捷方法
+function ResourceManager.init()
+  ResourceManager.get_default():init()
+end
+function ResourceManager.load_image(name, path)
+  return ResourceManager.get_default():load_image(name, path)
+end
+function ResourceManager.get_image(name)
+  return ResourceManager.get_default():get_image(name)
+end
+function ResourceManager.load_sound(name, path)
+  return ResourceManager.get_default():load_sound(name, path)
+end
+function ResourceManager.get_sound(name)
+  return ResourceManager.get_default():get_sound(name)
+end
+function ResourceManager.load_music(name, path)
+  return ResourceManager.get_default():load_music(name, path)
+end
+function ResourceManager.get_music(name)
+  return ResourceManager.get_default():get_music(name)
+end
+function ResourceManager.load_font(name, size, path)
+  return ResourceManager.get_default():load_font(name, size, path)
+end
+function ResourceManager.get_font(name, size)
+  return ResourceManager.get_default():get_font(name, size)
+end
 
 return ResourceManager

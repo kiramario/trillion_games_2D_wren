@@ -1,38 +1,43 @@
-# 构建产物
+# LÖVE2D 相关
+*.love
+*.app
+
+# 构建输出
 build/
 dist/
-*.love
 *.exe
-*.app
-*.dmg
-*.apk
+*.dll
+*.so
+*.dylib
 
-# 存档和日志
-saves/
-logs/
+# 截图
+screenshot_*.png
+
+# 日志
 *.log
+logs/
+
+# 存档
+saves/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # 系统文件
 .DS_Store
 Thumbs.db
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# 临时文件
-*.tmp
-*.temp
-*.bak
-
 # Lua 相关
 *.luac
-*.so
-*.dylib
-*.dll
+*.lua~
+.lua_history
 
-# LÖVE2D 缓存
-.love/
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.bak
