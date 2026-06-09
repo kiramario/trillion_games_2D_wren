@@ -5,7 +5,7 @@
 -- 说明：所有可见的游戏对象（棋子、棋盘、UI、特效等）都继承这个类
 -- ============================================================================
 
-local Utils = require("src.core.utils")
+local Utils = require("core.utils")
 
 local Entity = {}
 Entity.__index = Entity

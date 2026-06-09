@@ -5,8 +5,8 @@
 -- 说明：补间动画就是从一个值平滑过渡到另一个值，比如位置移动、大小变化、透明度变化
 -- ============================================================================
 
-local Utils = require("src.core.utils")
-local Logger = require("src.core.logger")
+local Utils = require("core.utils")
+local Logger = require("core.logger")
 
 -- ============================================================================
 -- 缓动函数集合
@@ -206,81 +206,77 @@ function AnimationSystem:update(dt)
     local tween = self.tweens[i]
     if not tween.active then
       table.remove(self.tweens, i)
-      goto continue
-    end
-
-    -- 延迟时间
-    if tween.delay > 0 then
-      tween.delay = tween.delay - dt
-      goto continue
-    end
-
-    -- 更新时间
-    if tween._direction == 1 then
-      tween.time = tween.time + dt
     else
-      tween.time = tween.time - dt
-    end
-
-    -- 计算进度（0~1）
-    local progress = tween.time / tween.duration
-    progress = Utils.clamp(progress, 0, 1)
-
-    -- 应用缓动
-    local eased = tween.ease(progress)
-
-    -- 更新属性
-    for _, key in ipairs(tween.properties) do
-      local from = tween.from[key]
-      local to = tween.to[key]
-      local value = Utils.lerp(from, to, eased)
-      tween.target[key] = value
-    end
-
-    -- 更新回调
-    if tween.on_update then
-      tween.on_update(progress)
-    end
-
-    -- 检查是否完成
-    local finished = false
-    if tween._direction == 1 and progress >= 1 then
-      finished = true
-    elseif tween._direction == -1 and progress <= 0 then
-      finished = true
-    end
-
-    if finished then
-      if tween.yoyo then
-        -- 往返动画，反向
-        tween._direction = -tween._direction
-        -- 如果是一次往返完成了，算一次循环
+      -- 延迟时间
+      if tween.delay > 0 then
+        tween.delay = tween.delay - dt
+      else
+        -- 更新时间
         if tween._direction == 1 then
-          tween._loop_count = tween._loop_count + 1
-          if tween.loops > 0 and tween._loop_count >= tween.loops then
+          tween.time = tween.time + dt
+        else
+          tween.time = tween.time - dt
+        end
+
+        -- 计算进度（0~1）
+        local progress = tween.time / tween.duration
+        progress = Utils.clamp(progress, 0, 1)
+
+        -- 应用缓动
+        local eased = tween.ease(progress)
+
+        -- 更新属性
+        for _, key in ipairs(tween.properties) do
+          local from = tween.from[key]
+          local to = tween.to[key]
+          local value = Utils.lerp(from, to, eased)
+          tween.target[key] = value
+        end
+
+        -- 更新回调
+        if tween.on_update then
+          tween.on_update(progress)
+        end
+
+        -- 检查是否完成
+        local finished = false
+        if tween._direction == 1 and progress >= 1 then
+          finished = true
+        elseif tween._direction == -1 and progress <= 0 then
+          finished = true
+        end
+
+        if finished then
+          if tween.yoyo then
+            -- 往返动画，反向
+            tween._direction = -tween._direction
+            -- 如果是一次往返完成了，算一次循环
+            if tween._direction == 1 then
+              tween._loop_count = tween._loop_count + 1
+              if tween.loops > 0 and tween._loop_count >= tween.loops then
+                self:_complete_tween(tween)
+                table.remove(self.tweens, i)
+              end
+            end
+          elseif tween.loops ~= 0 then
+            -- 普通循环
+            tween._loop_count = tween._loop_count + 1
+            if tween.loops > 0 and tween._loop_count >= tween.loops then
+              self:_complete_tween(tween)
+              table.remove(self.tweens, i)
+            else
+              -- 重新开始
+              tween.time = 0
+            end
+          else
+            -- 普通动画，完成了
             self:_complete_tween(tween)
             table.remove(self.tweens, i)
           end
-        end
-      elseif tween.loops ~= 0 then
-        -- 普通循环
-        tween._loop_count = tween._loop_count + 1
-        if tween.loops > 0 and tween._loop_count >= tween.loops then
-          self:_complete_tween(tween)
-          table.remove(self.tweens, i)
-        else
-          -- 重新开始
-          tween.time = 0
-        end
-      else
-        -- 普通动画，完成了
-        self:_complete_tween(tween)
-        table.remove(self.tweens, i)
-      end
-    end
-
-    ::continue::
-  end
+        end -- if finished
+      end -- if delay > 0
+    end -- if active
+  end -- for
 end
 
 -- ============================================================================

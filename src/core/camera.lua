@@ -5,8 +5,8 @@
 -- 说明：世界里的对象坐标是固定的，相机移动，看到的部分就不一样
 -- ============================================================================
 
-local Utils = require("src.core.utils")
-local Logger = require("src.core.logger")
+local Utils = require("core.utils")
+local Logger = require("core.logger")
 
 local Camera = {}
 Camera.__index = Camera

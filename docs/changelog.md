@@ -13,6 +13,58 @@
 
 ---
 
+## [v0.2.0] - 2024-06-09
+### 新增
+- 🎨 实体基类（`src/core/entity.lua`）
+  - 所有游戏对象的基类，位置、大小、缩放、旋转、透明度、颜色等属性
+  - 锚点、父子实体关系
+  - 碰撞检测（点是否在实体范围内）
+  - 完整的生命周期：update/draw/destroy
+  - 类比 Unity GameObject / Godot Node2D
+- 📷 相机系统（`src/core/camera.lua`）
+  - 位移、缩放、旋转
+  - 平滑移动和缩放
+  - 相机震动效果（增强打击感）
+  - 边界限制
+  - 屏幕坐标和世界坐标互相转换
+  - 视口计算
+- 🎬 渲染管理器（`src/core/render_manager.lua`）
+  - 分层渲染（5层：background/world_back/world_mid/world_front/ui）
+  - 同层按 z-index 排序
+  - 自动应用相机变换（世界层）
+  - UI 层不受相机影响
+  - 类比 Photoshop 图层 / Unity Sorting Layer
+- ✨ 动画与缓动系统（`src/core/animation.lua`）
+  - 补间动画（tween）：支持任意属性动画
+  - 20+ 种缓动函数：linear/quad/cubic/quart/sine/back/bounce/elastic
+  - 延迟、循环、往返（yoyo）
+  - on_update / on_complete 回调
+  - 类比 GSAP / CSS transition / DOTween
+- 🧪 渲染测试场景（`render_test.lua`）
+  - 测试分层渲染效果
+  - 测试相机移动、缩放、震动
+  - 测试实体和动画系统
+  - 浮动方块、旋转方块、网格背景、背景层
+
+### 说明
+V0.2.0 完成了渲染相关的所有通用能力。
+所有模块都是通用的，和具体游戏无关，可以复用到任何 2D 游戏。
+现在框架已经具备了基础的 2D 渲染能力。
+
+### 验收标准
+- ✅ 游戏正常启动，不报错
+- ✅ 渲染测试场景正常显示
+- ✅ WASD / 方向键可以移动相机
+- ✅ 鼠标滚轮可以缩放
+- ✅ 空格键可以触发相机震动
+- ✅ 动画正常播放（方块浮动、旋转）
+- ✅ 分层渲染正常（背景/地板/方块/UI 层次分明）
+- ✅ UI 层不受相机移动影响
+- ✅ F1 可以开关调试信息
+- ✅ 所有模块通用，不依赖具体游戏逻辑
+
+---
+
 ## [v0.1.0] - 2024-06-09
 ### 新增
 - 📝 日志系统（`src/core/logger.lua`）

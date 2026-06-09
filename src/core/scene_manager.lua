@@ -5,8 +5,8 @@
 -- 说明：每个场景是独立的"页面"，比如主菜单是一个场景，游戏中是另一个场景
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local Utils = require("src.core.utils")
+local Logger = require("core.logger")
+local Utils = require("core.utils")
 
 local SceneManager = {}
 SceneManager.__index = SceneManager

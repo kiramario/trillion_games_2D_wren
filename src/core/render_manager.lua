@@ -5,9 +5,9 @@
 -- 说明：所有要绘制的东西都加到渲染管理器，它会自动按层和 z-index 排序绘制
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local Utils = require("src.core.utils")
-local Camera = require("src.core.camera")
+local Logger = require("core.logger")
+local Utils = require("core.utils")
+local Camera = require("core.camera")
 
 local RenderManager = {}
 RenderManager.__index = RenderManager

@@ -6,8 +6,8 @@
 --       我们封装一下，方便查询某一帧内的按键状态
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local Utils = require("src.core.utils")
+local Logger = require("core.logger")
+local Utils = require("core.utils")
 
 local InputManager = {}
 InputManager.__index = InputManager

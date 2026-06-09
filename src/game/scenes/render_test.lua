@@ -3,13 +3,13 @@
 -- 功能：测试渲染管理器、相机、实体、动画系统
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local Entity = require("src.core.entity")
-local RenderManager = require("src.core.render_manager")
-local Animation = require("src.core.animation")
-local InputManager = require("src.core.input_manager")
-local SceneManager = require("src.core.scene_manager")
-local Utils = require("src.core.utils")
+local Logger = require("core.logger")
+local Entity = require("core.entity")
+local RenderManager = require("core.render_manager")
+local Animation = require("core.animation")
+local InputManager = require("core.input_manager")
+local SceneManager = require("core.scene_manager")
+local Utils = require("core.utils")
 
 local RenderTestScene = {}
 RenderTestScene.__index = RenderTestScene

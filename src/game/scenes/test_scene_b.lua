@@ -3,9 +3,9 @@
 -- 功能：测试用的第二个场景，冷色调
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local SceneManager = require("src.core.scene_manager")
-local InputManager = require("src.core.input_manager")
+local Logger = require("core.logger")
+local SceneManager = require("core.scene_manager")
+local InputManager = require("core.input_manager")
 
 local TestSceneB = {}
 TestSceneB.__index = TestSceneB
