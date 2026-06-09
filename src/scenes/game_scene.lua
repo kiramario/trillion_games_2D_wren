@@ -16,6 +16,7 @@ local Board = require("entities.board")
 local Piece = require("entities.piece")
 local GameState = require("game.game_state")
 local Rules = require("game.rules")
+local AI = require("game.ai")
 local Config = require("core.config")
 local Utils = require("core.utils")
 
@@ -52,6 +53,16 @@ function GameScene.new()
     
     -- 游戏状态
     self._game_state = nil
+    
+    -- 游戏模式："pvp"（双人对战） / "pve"（人机对战）
+    self._game_mode = "pve"
+    
+    -- AI配置
+    self._ai_color = "black"      -- AI执黑（默认玩家走红，AI走黑）
+    self._ai_difficulty = "NORMAL" -- AI难度
+    self._ai_thinking = false      -- AI是否正在思考
+    self._ai_think_delay = 0.5     -- AI思考延迟（秒，假装在想，不然太快了）
+    self._ai_delay_timer = 0       -- 延迟计时器
     
     return self
 end
@@ -241,10 +252,41 @@ function GameScene:_on_key_press(data)
     -- 按u悔棋
     if key == "u" then
         if self._game_state and not self._game_state.game_over then
-            -- 悔一步，双人模式的话悔一步就是对方的上一步，所以要悔两步？
-            -- 我们先做悔一步，后面可以调
+            -- 悔一步，人机模式的话要悔两步，把AI的一步也悔掉
             self._game_state:undo_move()
+            if self._game_mode == "pve" and #self._game_state.move_history > 0 then
+                -- 再悔一步，把AI的也悔了，回到玩家走之前
+                self._game_state:undo_move()
+            end
         end
+    end
+    
+    -- 按m切换对战模式（PVP/PVE）
+    if key == "m" then
+        self._game_mode = self._game_mode == "pve" and "pvp" or "pve"
+        -- 重置游戏
+        if self._game_state then
+            self._game_state:init_board()
+        end
+        Logger.info("切换模式：" .. self._game_mode)
+    end
+    
+    -- 按1-4切换AI难度
+    if key == "1" then
+        self._ai_difficulty = "EASY"
+        Logger.info("AI难度：简单")
+    end
+    if key == "2" then
+        self._ai_difficulty = "NORMAL"
+        Logger.info("AI难度：中等")
+    end
+    if key == "3" then
+        self._ai_difficulty = "HARD"
+        Logger.info("AI难度：困难")
+    end
+    if key == "4" then
+        self._ai_difficulty = "EXPERT"
+        Logger.info("AI难度：专家（有点慢）")
     end
     
     -- 按s相机震动测试
@@ -296,6 +338,26 @@ function GameScene:update(dt)
         self._game_state:update(dt, self._board)
     end
     
+    -- AI走棋逻辑
+    if self._game_state and self._game_mode == "pve" and not self._game_state.game_over then
+        if self._game_state.current_turn == self._ai_color then
+            -- 轮到AI走
+            if not self._ai_thinking then
+                -- 开始思考
+                self._ai_thinking = true
+                self._ai_delay_timer = self._ai_think_delay
+            else
+                -- 思考中，计时
+                self._ai_delay_timer = self._ai_delay_timer - dt
+                if self._ai_delay_timer <= 0 then
+                    -- 思考时间到，走棋
+                    self:_ai_make_move()
+                    self._ai_thinking = false
+                end
+            end
+        end
+    end
+    
     -- 更新点击点的时间，做淡出效果
     for i = #self._click_points, 1, -1 do
         local point = self._click_points[i]
@@ -304,6 +366,40 @@ function GameScene:update(dt)
         if point.time > 3 then
             table.remove(self._click_points, i)
         end
+    end
+end
+
+--[[
+    AI走一步棋
+]]
+function GameScene:_ai_make_move()
+    if not self._game_state or self._game_state.game_over then
+        return
+    end
+    
+    -- AI思考，选出最优走法
+    local best_move, score = AI.get_best_move(
+        self._game_state,
+        self._ai_color,
+        self._ai_difficulty
+    )
+    
+    if best_move then
+        -- 走棋
+        Logger.info(string.format("AI走子：%s %s (%d,%d) → (%d,%d)，评估分 %.2f",
+            best_move.piece.color, best_move.piece:get_char(),
+            best_move.piece.col, best_move.piece.row,
+            best_move.to_col, best_move.to_row,
+            score))
+        
+        self._game_state:move_piece(
+            best_move.piece,
+            best_move.to_col,
+            best_move.to_row,
+            true  -- 播放动画
+        )
+    else
+        Logger.warn("AI没有找到合法走法")
     end
 end
 
@@ -429,6 +525,23 @@ function GameScene:draw()
                 love.graphics.print("⚠ 将军！", 10, 210)
                 love.graphics.setColor(1, 1, 1, 1)
             end
+            
+            -- 模式和难度
+            local mode_text = self._game_mode == "pve" and "人机对战" or "双人对战"
+            love.graphics.print("游戏模式: " .. mode_text, 10, 230)
+            if self._game_mode == "pve" then
+                local diff_name = AI.DIFFICULTY[self._ai_difficulty] and AI.DIFFICULTY[self._ai_difficulty].name or "未知"
+                love.graphics.print("AI难度: " .. diff_name, 10, 250)
+            end
+        end
+        
+        -- AI思考提示
+        if self._game_mode == "pve" and self._ai_thinking then
+            love.graphics.setColor(1, 0.8, 0.2, 1)
+            local thinking_text = "AI思考中..."
+            local text_w = love.graphics.getFont():getWidth(thinking_text)
+            love.graphics.print(thinking_text, love.graphics.getWidth() - text_w - 20, 20)
+            love.graphics.setColor(1, 1, 1, 1)
         end
         
         -- 游戏结束提示（在最上面）
@@ -485,7 +598,7 @@ function GameScene:draw()
         
         -- 底部提示
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
-        local hint = "点击己方棋子选中 | 绿点可走 | 红圈可吃 | U 悔棋 | R 重开 | 2 返回菜单"
+        local hint = "点击己方棋子走棋 | U 悔棋 | M 切换模式 | 1-4 切换难度 | R 重开 | 2 返回菜单"
         local hint_width = love.graphics.getFont():getWidth(hint)
         love.graphics.print(hint, (love.graphics.getWidth() - hint_width) / 2, love.graphics.getHeight() - 30)
     end)
