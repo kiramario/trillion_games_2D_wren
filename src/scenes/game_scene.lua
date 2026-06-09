@@ -15,6 +15,7 @@ local CameraSystem = require("systems.camera_system")
 local Board = require("entities.board")
 local Piece = require("entities.piece")
 local GameState = require("game.game_state")
+local Rules = require("game.rules")
 local Config = require("core.config")
 local Utils = require("core.utils")
 
@@ -149,22 +150,58 @@ function GameScene:_on_mouse_press(data)
         
         -- 检查是否点到了棋子
         local clicked_piece = self._game_state:get_piece_at(col, row)
+        local selected_piece = self._game_state.selected_piece
         
-        if clicked_piece then
-            -- 点到了棋子
-            Logger.debug(string.format("点击到棋子：%s %s", clicked_piece.color, clicked_piece:get_char()))
-            
-            -- 如果当前没有选中的棋子，或者点的是不同的棋子，选中这个
-            if not self._game_state.selected_piece or 
-               self._game_state.selected_piece ~= clicked_piece then
+        if selected_piece then
+            -- 已经有选中的棋子
+            if clicked_piece and clicked_piece.color == self._game_state.current_turn then
+                -- 点的是己方其他棋子，切换选中
                 self._game_state:select_piece(clicked_piece)
             else
-                -- 点的是同一个棋子，取消选中
-                self._game_state:select_piece(nil)
+                -- 点的是空白或者对方棋子，尝试走子
+                local valid, reason = Rules.is_valid_move(
+                    selected_piece, col, row, self._game_state
+                )
+                
+                if valid then
+                    -- 合法，走子
+                    Logger.info(string.format("走子：%s %s (%d,%d) → (%d,%d)",
+                        selected_piece.color, selected_piece:get_char(),
+                        selected_piece.col, selected_piece.row, col, row))
+                    
+                    local captured = self._game_state:move_piece(
+                        selected_piece, col, row, true  -- true表示播放动画
+                    )
+                    
+                    if captured then
+                        Logger.info(string.format("吃了对方的%s %s",
+                            captured.color, captured:get_char()))
+                    end
+                else
+                    -- 不合法，提示一下（log里）
+                    Logger.debug("走子不合法：" .. reason)
+                    -- 点空白处取消选中？还是保持选中让玩家再选？
+                    -- 我们保持选中吧，这样玩家可以继续选目标
+                    if not clicked_piece then
+                        -- 点空白处，取消选中
+                        self._game_state:select_piece(nil)
+                    end
+                end
             end
         else
-            -- 点到空白处，取消选中
-            self._game_state:select_piece(nil)
+            -- 还没选中棋子
+            if clicked_piece then
+                -- 只能选中己方的棋子（当前回合的）
+                if clicked_piece.color == self._game_state.current_turn then
+                    self._game_state:select_piece(clicked_piece)
+                    Logger.debug(string.format("选中棋子：%s %s", 
+                        clicked_piece.color, clicked_piece:get_char()))
+                else
+                    -- 点的是对方棋子，不能选中
+                    Logger.debug("不能选对方的棋子")
+                end
+            end
+            -- 点空白处什么都不做
         end
     end
 end
@@ -281,6 +318,32 @@ function GameScene:draw()
             self._board:draw()
         end
         
+        -- 绘制可走位置标记（选中棋子时显示）
+        if self._game_state and self._game_state.selected_piece and self._board then
+            local valid_moves = Rules.get_valid_moves(
+                self._game_state.selected_piece, self._game_state
+            )
+            
+            for _, move in ipairs(valid_moves) do
+                local x, y = self._board:board_to_screen(move.col, move.row)
+                
+                -- 看看这个位置有没有棋子（就是可以吃的）
+                local target_piece = self._game_state:get_piece_at(move.col, move.row)
+                
+                if target_piece then
+                    -- 可以吃的棋子，画个红圈
+                    love.graphics.setColor(1, 0.2, 0.2, 0.6)
+                    love.graphics.setLineWidth(3)
+                    love.graphics.circle("line", x, y, self._board.cell_size * 0.45)
+                    love.graphics.setLineWidth(1)
+                else
+                    -- 空位置，画个小圆点
+                    love.graphics.setColor(0.2, 0.8, 0.2, 0.6)
+                    love.graphics.circle("fill", x, y, 8)
+                end
+            end
+        end
+        
         -- 绘制棋子
         if self._game_state and self._board then
             self._game_state:draw_pieces(self._board.cell_size)
@@ -343,11 +406,12 @@ function GameScene:draw()
             end
             
             love.graphics.print("棋子总数: " .. #self._game_state.pieces, 10, 170)
+            love.graphics.print("走子步数: " .. #self._game_state.move_history, 10, 190)
         end
         
         -- 底部提示
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
-        local hint = "点击棋子选中 | 滚轮缩放棋盘 | R 重置游戏 | S 相机震动 | 2 返回菜单"
+        local hint = "点击己方棋子选中 | 绿点可走 | 红圈可吃 | R 重置游戏 | 2 返回菜单"
         local hint_width = love.graphics.getFont():getWidth(hint)
         love.graphics.print(hint, (love.graphics.getWidth() - hint_width) / 2, love.graphics.getHeight() - 30)
     end)
