@@ -13,6 +13,8 @@ local RenderSystem = require("systems.render_system")
 local InputSystem = require("systems.input_system")
 local CameraSystem = require("systems.camera_system")
 local Board = require("entities.board")
+local Piece = require("entities.piece")
+local GameState = require("game.game_state")
 local Config = require("core.config")
 local Utils = require("core.utils")
 
@@ -47,6 +49,9 @@ function GameScene.new()
     -- 棋盘
     self._board = nil
     
+    -- 游戏状态
+    self._game_state = nil
+    
     return self
 end
 
@@ -66,6 +71,10 @@ function GameScene:enter(params)
     self._board = Board.new()
     -- 自适应窗口
     self._board:fit_to_window(love.graphics.getWidth(), love.graphics.getHeight())
+    
+    -- 初始化游戏状态，摆放棋子
+    self._game_state = GameState.new()
+    self._game_state:init_board()
     
     -- 订阅鼠标事件
     self._mouse_press_callback = function(data)
@@ -130,6 +139,34 @@ function GameScene:_on_mouse_press(data)
     if #self._click_points > 50 then
         table.remove(self._click_points, 1)
     end
+    
+    -- 处理棋子点击
+    if self._game_state and self._board then
+        -- 转换为棋盘坐标
+        local col_f, row_f = self._board:screen_to_board(data.x, data.y)
+        local col = math.floor(col_f + 0.5)
+        local row = math.floor(row_f + 0.5)
+        
+        -- 检查是否点到了棋子
+        local clicked_piece = self._game_state:get_piece_at(col, row)
+        
+        if clicked_piece then
+            -- 点到了棋子
+            Logger.debug(string.format("点击到棋子：%s %s", clicked_piece.color, clicked_piece:get_char()))
+            
+            -- 如果当前没有选中的棋子，或者点的是不同的棋子，选中这个
+            if not self._game_state.selected_piece or 
+               self._game_state.selected_piece ~= clicked_piece then
+                self._game_state:select_piece(clicked_piece)
+            else
+                -- 点的是同一个棋子，取消选中
+                self._game_state:select_piece(nil)
+            end
+        else
+            -- 点到空白处，取消选中
+            self._game_state:select_piece(nil)
+        end
+    end
 end
 
 --[[
@@ -151,10 +188,12 @@ function GameScene:_on_key_press(data)
         Logger.info("清除所有点击点")
     end
     
-    -- 按r重置棋盘大小
+    -- 按r重置游戏
     if key == "r" then
-        self._board:fit_to_window(love.graphics.getWidth(), love.graphics.getHeight())
-        Logger.info("重置棋盘大小")
+        if self._game_state then
+            self._game_state:init_board()
+            Logger.info("游戏已重置")
+        end
     end
     
     -- 按s相机震动测试
@@ -201,6 +240,11 @@ function GameScene:update(dt)
         self._camera:update(dt)
     end
     
+    -- 更新游戏状态（棋子动画等）
+    if self._game_state and self._board then
+        self._game_state:update(dt, self._board)
+    end
+    
     -- 更新点击点的时间，做淡出效果
     for i = #self._click_points, 1, -1 do
         local point = self._click_points[i]
@@ -235,6 +279,11 @@ function GameScene:draw()
         -- 绘制棋盘
         if self._board then
             self._board:draw()
+        end
+        
+        -- 绘制棋子
+        if self._game_state and self._board then
+            self._game_state:draw_pieces(self._board.cell_size)
         end
         
         -- 画点击的点（测试用，后面换成棋子）
@@ -282,9 +331,23 @@ function GameScene:draw()
             love.graphics.print("格子大小: " .. self._board.cell_size .. "px", 10, 110)
         end
         
+        -- 当前回合和选中信息
+        if self._game_state then
+            local turn_text = self._game_state.current_turn == "red" and "红方回合" or "黑方回合"
+            love.graphics.print("当前回合: " .. turn_text, 10, 130)
+            
+            if self._game_state.selected_piece then
+                local piece = self._game_state.selected_piece
+                love.graphics.print(string.format("选中棋子: %s %s", 
+                    piece.color == "red" and "红" or "黑", piece:get_char()), 10, 150)
+            end
+            
+            love.graphics.print("棋子总数: " .. #self._game_state.pieces, 10, 170)
+        end
+        
         -- 底部提示
         love.graphics.setColor(0.6, 0.6, 0.6, 1)
-        local hint = "鼠标滚轮缩放棋盘 | 按 R 重置大小 | 按 S 相机震动测试 | 按 2 返回菜单"
+        local hint = "点击棋子选中 | 滚轮缩放棋盘 | R 重置游戏 | S 相机震动 | 2 返回菜单"
         local hint_width = love.graphics.getFont():getWidth(hint)
         love.graphics.print(hint, (love.graphics.getWidth() - hint_width) / 2, love.graphics.getHeight() - 30)
     end)
