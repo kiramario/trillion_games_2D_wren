@@ -5,8 +5,8 @@
 -- 说明：LÖVE2D 加载资源是有开销的，加载过的缓存起来，下次直接用
 -- ============================================================================
 
-local Logger = require("src.core.logger")
-local Utils = require("src.core.utils")
+local Logger = require("core.logger")
+local Utils = require("core.utils")
 
 local ResourceManager = {}
 ResourceManager.__index = ResourceManager

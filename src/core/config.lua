@@ -4,7 +4,7 @@
 -- 类比：JS 的 config 对象，Java 的 application.yml，Python 的 config.py
 -- ============================================================================
 
-local Utils = require("src.core.utils")
+local Utils = require("core.utils")
 
 local Config = {}
 Config.__index = Config

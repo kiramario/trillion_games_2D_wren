@@ -3,30 +3,42 @@
     所属层: 入口层
     功能: LÖVE2D 程序入口，初始化所有核心模块
     类比: 类似 JS 的 index.js，Python 的 if __name__ == "__main__"
-    版本: v0.1.0 - 基础脚手架
+    版本: v0.2.0 - 渲染增强
 --]]
 
+-- 把 src 目录加入模块搜索路径，这样 require 的时候会去 src 里找
+package.path = 'src/?.lua;src/?/init.lua;' .. package.path
+
 -- 导入核心模块
-local Logger = require("src.core.logger")
-local Config = require("src.core.config")
-local InputManager = require("src.core.input_manager")
-local SceneManager = require("src.core.scene_manager")
-local ResourceManager = require("src.core.resource_manager")
-local Utils = require("src.core.utils")
+local Logger = require("core.logger")
+local Config = require("core.config")
+local InputManager = require("core.input_manager")
+local SceneManager = require("core.scene_manager")
+local ResourceManager = require("core.resource_manager")
+local RenderManager = require("core.render_manager")
+local Camera = require("core.camera")
+local Entity = require("core.entity")
+local Animation = require("core.animation")
+local Utils = require("core.utils")
 
 -- 导入测试场景
-local TestSceneA = require("src.game.scenes.test_scene_a")
-local TestSceneB = require("src.game.scenes.test_scene_b")
+local TestSceneA = require("game.scenes.test_scene_a")
+local TestSceneB = require("game.scenes.test_scene_b")
+local RenderTestScene = require("game.scenes.render_test")
 
 -- 全局游戏对象（尽量少用全局，这里是为了方便各个模块访问）
 -- 类比：类似 JS 的 window.game，或者单例模式
 Game = {
-    version = "v0.1.0",
+    version = "v0.2.0",
     logger = Logger,
     config = Config,
     input = InputManager,
     scenes = SceneManager,
     resources = ResourceManager,
+    render = RenderManager,
+    camera = Camera,
+    entity = Entity,
+    animation = Animation,
     utils = Utils,
 
     -- 游戏状态
@@ -59,22 +71,33 @@ function love.load(arg)
     ResourceManager.init()
     Logger.debug("资源管理器初始化完成")
 
-    -- 5. 初始化场景管理器，注册所有场景
+    -- 5. 初始化渲染管理器
+    local _ = RenderManager.get_default()
+    Logger.debug("渲染管理器初始化完成")
+
+    -- 6. 初始化动画系统
+    local _ = Animation.get_default()
+    Logger.debug("动画系统初始化完成")
+
+    -- 7. 初始化场景管理器，注册所有场景
     SceneManager.init()
     SceneManager.register("test_a", TestSceneA)
     SceneManager.register("test_b", TestSceneB)
-    Logger.debug("场景管理器初始化完成，已注册 2 个测试场景")
+    SceneManager.register("render_test", RenderTestScene)
+    Logger.debug("场景管理器初始化完成，已注册 3 个测试场景")
 
-    -- 6. 切换到初始场景（测试场景 A）
-    SceneManager.switch("test_a")
-    Logger.info("初始场景加载完成: 测试场景 A")
+    -- 8. 切换到初始场景（渲染测试场景）
+    SceneManager.switch("render_test")
+    Logger.info("初始场景加载完成: 渲染测试场景")
 
-    -- 7. 启动完成
+    -- 9. 启动完成
     Logger.info("游戏启动成功！")
     Logger.info("操作说明：")
-    Logger.info("  - 空格键：切换场景")
+    Logger.info("  - WASD / 方向键：移动相机")
+    Logger.info("  - 鼠标滚轮：缩放")
+    Logger.info("  - 空格：相机震动")
     Logger.info("  - F1：切换调试模式")
-    Logger.info("  - ESC：退出游戏")
+    Logger.info("  - ESC：返回上一个场景 / 退出")
     Logger.info("========================================")
 end
 
@@ -98,11 +121,17 @@ function love.update(dt)
     if InputManager.is_key_pressed("f1") then
         Game.debug_mode = not Game.debug_mode
         Logger.info("调试模式: " .. (Game.debug_mode and "开启" or "关闭"))
+        -- 渲染管理器的调试模式也跟着切
+        RenderManager.get_default().debug_mode = Game.debug_mode
     end
 
-    -- 4. ESC 退出
-    if InputManager.is_key_pressed("cancel") then
-        love.event.quit()
+    -- 4. ESC 退出（如果场景栈只有一层，就退出游戏）
+    if InputManager.is_key_pressed("escape") then
+        if SceneManager.get_stack_depth() <= 1 then
+            love.event.quit()
+        else
+            SceneManager.pop()
+        end
     end
 end
 
@@ -113,27 +142,27 @@ function love.draw()
     -- 1. 绘制当前场景
     SceneManager.draw()
 
-    -- 2. 调试信息
+    -- 2. 全局调试信息
     if Game.debug_mode then
-        _draw_debug_info()
+        _draw_global_debug_info()
     end
 end
 
 -- ============================================================================
--- 绘制调试信息
+-- 绘制全局调试信息（左上角）
 -- ============================================================================
-function _draw_debug_info()
-    -- 半透明背景
+function _draw_global_debug_info()
     love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", 10, 10, 260, 130)
+    love.graphics.rectangle("fill", 10, 10, 240, 120)
 
-    -- 文字
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.print("版本: " .. Game.version, 20, 20)
     love.graphics.print("FPS: " .. love.timer.getFPS(), 20, 40)
-    love.graphics.print("场景: " .. (SceneManager.current_scene_name or "unknown"), 20, 60)
-    love.graphics.print("栈深度: " .. SceneManager.get_stack_depth(), 20, 80)
-    love.graphics.print("调试模式: 开启 (F1 关闭)", 20, 100)
+    
+    local _, scene_name = SceneManager.get_current()
+    love.graphics.print("场景: " .. (scene_name or "unknown"), 20, 60)
+    love.graphics.print("场景栈: " .. SceneManager.get_stack_depth() .. " 层", 20, 80)
+    love.graphics.print("动画数: " .. Animation.get_default():get_active_count(), 20, 100)
 end
 
 -- ============================================================================
